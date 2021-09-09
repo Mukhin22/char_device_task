@@ -1,0 +1,4 @@
+config CHAR_LED
+        tristate "char_led"
+        default m
+
