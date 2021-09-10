@@ -2,7 +2,7 @@
 
 1. Cross-compile module
 
-*make -j9 ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules*
+*make -j$(nproc) ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules*
 
 - This operation should be performed with preinstalled rapbpios kernel build tools.
 - To get and build your own kernel follow the [link](https://www.raspberrypi.org/documentation/computers/linux_kernel.html)
