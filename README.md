@@ -5,7 +5,7 @@
 *make -j9 ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules*
 
 - This operation should be performed with preinstalled rapbpios kernel build tools.
-
+- To get and build your own kernel follow the [link](https://www.raspberrypi.org/documentation/computers/linux_kernel.html)
 - Kernel sources should be downloaded and build. After your kernel will be stored in linux/ directory.
 
 - Module directory should be linux/drivers/char_led/
@@ -29,7 +29,7 @@ from current directory:
 
 6. Next module should be seen in /dev/ directory. Check it with 
 
-	*ls /dev/* | grep 'LED_CTRL'*
+	ls /dev/* | grep 'LED_CTRL'
 
 7. Check the module is working with commands
 
