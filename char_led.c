@@ -158,8 +158,8 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 		len = 1;
 		break;
 	default:
-		led_value = -1;
-		len = 0;
+		pr_err("invalid minor value\n");
+		return -EINVAL;
 		break;
 	}
 
