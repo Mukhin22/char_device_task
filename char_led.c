@@ -104,7 +104,6 @@ void __exit cleanup_module(void)
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 
 	if (msg) {
-        /* release the malloc */
         kfree(msg);
 	}
 
@@ -175,14 +174,13 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 
 static ssize_t my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 {
+	int minor;
+	short count;
 	if (len <= MAX_MESSAGE_LEN || len < 0) {
 		pr_err("Invalid len parameter\n");
 		return -EINVAL;
 	}
-
-	int minor;
-	short count;
-
+	
 	memset(msg, 0, MAX_MESSAGE_LEN);
 	/* need to get the device minor number because we have two devices */
 	minor = iminor(file_inode(fil));
