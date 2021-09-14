@@ -58,8 +58,10 @@ int __init init_module(void)
 	register_chrdev_region(devno, count , GPIO_ANY_GPIO_DEVICE_DESC);
 
 	msg = (char *)kmalloc(MAX_MESSAGE_LEN, GFP_KERNEL);
-	if (msg !=NULL)
-		pr_info("malloc allocator address: 0x%p\n", msg);
+	if (msg == NULL) {
+		pr_info("Allocation failed.\n");
+		return -ENOMEM;
+	}
 	
 	if (!gpio_is_valid(RED_LED_PIN)) {
 		pr_err("Invalid RED_LED_PIN\n");
