@@ -21,7 +21,7 @@
 
 #define RED_LED_PIN 16
 #define BLUE_LED_PIN 20
-
+#define MAX_MESSAGE_LEN 32
 #define MY_MAJOR  200
 #define MY_MINOR  0
 #define MY_DEV_COUNT 2
@@ -57,7 +57,7 @@ int __init init_module(void)
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 	register_chrdev_region(devno, count , GPIO_ANY_GPIO_DEVICE_DESC);
 
-	msg = (char *)kmalloc(32, GFP_KERNEL);
+	msg = (char *)kmalloc(MAX_MESSAGE_LEN, GFP_KERNEL);
 	if (msg !=NULL)
 		pr_info("malloc allocator address: 0x%p\n", msg);
 	
@@ -139,6 +139,11 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 	char led_value;
 	short count;
 
+	if (len <= MAX_MESSAGE_LEN || len < 0) {
+		pr_err("Invalid len parameter\n");
+		return -EINVAL;
+	}
+	
 	major = imajor(file_inode(fil));
 	minor = iminor(file_inode(fil));
 
@@ -170,10 +175,15 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 
 static ssize_t my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 {
+	if (len <= MAX_MESSAGE_LEN || len < 0) {
+		pr_err("Invalid len parameter\n");
+		return -EINVAL;
+	}
+
 	int minor;
 	short count;
 
-	memset(msg, 0, 32);
+	memset(msg, 0, MAX_MESSAGE_LEN);
 	/* need to get the device minor number because we have two devices */
 	minor = iminor(file_inode(fil));
 	/* copy the string from the user space program which open and write this device */
