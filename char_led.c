@@ -146,20 +146,21 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 	major = imajor(file_inode(fil));
 	minor = iminor(file_inode(fil));
 
-	switch(minor){
-		case 0:
-			led_value = gpio_get_value(RED_LED_PIN);
-			msg[0] = led_value;
-			len = 1;
-			break;
-		case 1:
-			led_value = gpio_get_value(BLUE_LED_PIN);
-			msg[0] = led_value;
-			len = 1;
-			break;
-		default:
-			led_value = -1;
-			len = 0;
+	switch(minor) {
+	case 0:
+		led_value = gpio_get_value(RED_LED_PIN);
+		msg[0] = led_value;
+		len = 1;
+		break;
+	case 1:
+		led_value = gpio_get_value(BLUE_LED_PIN);
+		msg[0] = led_value;
+		len = 1;
+		break;
+	default:
+		led_value = -1;
+		len = 0;
+		break;
 	}
 
 
