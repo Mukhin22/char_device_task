@@ -37,7 +37,7 @@ static ssize_t my_read(struct file *, char *, size_t, loff_t *);
 static ssize_t my_write(struct file *, const  char *, size_t, loff_t*);
 static int     my_close(struct inode *, struct file *);
 
-struct file_operations my_fops = {
+static struct file_operations my_fops = {
         read    :       my_read,
         write   :       my_write,
         open    :       my_open,
@@ -46,7 +46,7 @@ struct file_operations my_fops = {
 };
 
 static char   *msg=NULL;
-struct cdev my_cdev;
+static struct cdev my_cdev;
 
 int __init init_module(void)
 {
@@ -56,19 +56,6 @@ int __init init_module(void)
 
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 	register_chrdev_region(devno, count , GPIO_ANY_GPIO_DEVICE_DESC);
-
-	cdev_init(&my_cdev, &my_fops);
-	my_cdev.owner = THIS_MODULE;
-	err = cdev_add(&my_cdev, devno, count);
-
-	if (err < 0) {
-		pr_err("Device Add Error\n");
-		return -ENODEV;
-	}
-
-	pr_info("This is my led control char driver\n");
-	pr_info("'mknod /dev/LED_CTRL0 c %d 0'.\n", MY_MAJOR);
-	pr_info("'mknod /dev/LED_CTRL1 c %d 1'.\n", MY_MAJOR);
 
 	msg = (char *)kmalloc(32, GFP_KERNEL);
 	if (msg !=NULL)
@@ -89,13 +76,26 @@ int __init init_module(void)
 	gpio_request(BLUE_LED_PIN, "sysfs");
 	gpio_direction_output(BLUE_LED_PIN, 0);
 
+	cdev_init(&my_cdev, &my_fops);
+	my_cdev.owner = THIS_MODULE;
+	err = cdev_add(&my_cdev, devno, count);
+
+	if (err < 0) {
+		pr_err("Device Add Error\n");
+		return -ENODEV;
+	}
+
+	pr_info("This is my led control char driver\n");
+	pr_info("'mknod /dev/LED_CTRL0 c %d 0'.\n", MY_MAJOR);
+	pr_info("'mknod /dev/LED_CTRL1 c %d 1'.\n", MY_MAJOR);
+
     return 0;
 }
 
 void __exit cleanup_module(void)
 {
 	dev_t devno;
-        pr_info("Deinit char led driver\n");
+    pr_info("Deinit char led driver\n");
 
 	gpio_set_value(RED_LED_PIN, 0);
 	gpio_set_value(BLUE_LED_PIN,0);
@@ -103,7 +103,7 @@ void __exit cleanup_module(void)
 	gpio_free(BLUE_LED_PIN);
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 
-	if (msg){
+	if (msg) {
         /* release the malloc */
         kfree(msg);
 	}
@@ -163,7 +163,7 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 	pr_info("GPIO%d=%d, GPIO%d=%d\n", RED_LED_PIN, gpio_get_value(RED_LED_PIN),
 			 BLUE_LED_PIN, gpio_get_value(BLUE_LED_PIN));
 
-	return 0;
+	return len;
 }
 
 
@@ -195,7 +195,7 @@ static int my_close(struct inode *inod, struct file *fil)
 {
 	int minor;
 	minor = iminor(file_inode(fil));
-	pr_info("Some body is closing me at major %d\n", minor);
+	pr_info("Some body is closing me at minor %d\n", minor);
 
 	return 0;
 }
