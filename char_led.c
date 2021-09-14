@@ -89,7 +89,7 @@ int __init init_module(void)
 	pr_info("'mknod /dev/LED_CTRL0 c %d 0'.\n", MY_MAJOR);
 	pr_info("'mknod /dev/LED_CTRL1 c %d 1'.\n", MY_MAJOR);
 
-    return 0;
+	return 0;
 }
 
 void __exit cleanup_module(void)
