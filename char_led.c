@@ -18,6 +18,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
+#include <linux/mutex.h>
 
 #define RED_LED_PIN 16
 #define BLUE_LED_PIN 20
@@ -47,6 +48,7 @@ static struct file_operations my_fops = {
 
 static char   *msg=NULL;
 static struct cdev my_cdev;
+static DEFINE_MUTEX(msg_lock);
 
 int __init init_module(void)
 {
@@ -56,13 +58,15 @@ int __init init_module(void)
 
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 	register_chrdev_region(devno, count , GPIO_ANY_GPIO_DEVICE_DESC);
-
+	mutex_lock(&msg_lock);
 	msg = (char *)kmalloc(MAX_MESSAGE_LEN, GFP_KERNEL);
 	if (msg == NULL) {
 		pr_info("Allocation failed.\n");
+		mutex_unlock(&msg_lock);
 		return -ENOMEM;
 	}
-	
+	mutex_unlock(&msg_lock);
+
 	if (!gpio_is_valid(RED_LED_PIN)) {
 		pr_err("Invalid RED_LED_PIN\n");
 		return -ENODEV;
@@ -105,9 +109,11 @@ void __exit cleanup_module(void)
 	gpio_free(BLUE_LED_PIN);
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 
+	mutex_lock(&msg_lock);
 	if (msg) {
         kfree(msg);
 	}
+	mutex_unlock(&msg_lock);
 
 	unregister_chrdev_region(devno, MY_DEV_COUNT);
 	cdev_del(&my_cdev);
@@ -151,12 +157,20 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 	switch(minor) {
 	case 0:
 		led_value = gpio_get_value(RED_LED_PIN);
+
+		mutex_lock(&msg_lock);
 		msg[0] = led_value;
+		mutex_unlock(&msg_lock);
+
 		len = 1;
 		break;
 	case 1:
 		led_value = gpio_get_value(BLUE_LED_PIN);
+
+		mutex_lock(&msg_lock);
 		msg[0] = led_value;
+		mutex_unlock(&msg_lock);
+
 		len = 1;
 		break;
 	default:
@@ -165,8 +179,10 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 		break;
 	}
 
-
+	mutex_lock(&msg_lock);
 	count = copy_to_user(buff, msg, len);
+	mutex_unlock(&msg_lock);
+
 	pr_info("GPIO%d=%d, GPIO%d=%d\n", RED_LED_PIN, gpio_get_value(RED_LED_PIN),
 			 BLUE_LED_PIN, gpio_get_value(BLUE_LED_PIN));
 
@@ -184,6 +200,7 @@ static ssize_t my_write(struct file *fil, const char *buff, size_t len, loff_t *
 		return -EINVAL;
 	}
 
+	mutex_lock(&msg_lock);
 	memset(msg, 0, MAX_MESSAGE_LEN);
 	/* need to get the device minor number because we have two devices */
 	minor = iminor(file_inode(fil));
@@ -198,6 +215,7 @@ static ssize_t my_write(struct file *fil, const char *buff, size_t len, loff_t *
 		if(minor == 1) gpio_set_value(BLUE_LED_PIN, 0);     // BLUE_LED_PIN 1 OFF
 	}  else 
 		pr_err("Unknown command , 1 or 0 \n");
+	mutex_unlock(&msg_lock);
 
 	return len;
 }
