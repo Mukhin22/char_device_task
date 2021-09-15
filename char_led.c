@@ -156,21 +156,17 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 
 	switch(minor) {
 	case 0:
-		led_value = gpio_get_value(RED_LED_PIN);
-
 		mutex_lock(&msg_lock);
+		led_value = gpio_get_value(RED_LED_PIN);
 		msg[0] = led_value;
 		mutex_unlock(&msg_lock);
-
 		len = 1;
 		break;
 	case 1:
-		led_value = gpio_get_value(BLUE_LED_PIN);
-
 		mutex_lock(&msg_lock);
+		led_value = gpio_get_value(BLUE_LED_PIN);
 		msg[0] = led_value;
 		mutex_unlock(&msg_lock);
-
 		len = 1;
 		break;
 	default:
@@ -181,10 +177,9 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 
 	mutex_lock(&msg_lock);
 	count = copy_to_user(buff, msg, len);
-	mutex_unlock(&msg_lock);
-
 	pr_info("GPIO%d=%d, GPIO%d=%d\n", RED_LED_PIN, gpio_get_value(RED_LED_PIN),
 			 BLUE_LED_PIN, gpio_get_value(BLUE_LED_PIN));
+	mutex_unlock(&msg_lock);
 
 	return len;
 }
