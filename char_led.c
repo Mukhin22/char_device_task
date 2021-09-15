@@ -148,7 +148,7 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 
 	if (len >= MAX_MESSAGE_LEN || len < 0) {
 		pr_err("Invalid len parameter\n");
-		return -EINVAL;
+		return -EBADRQC;
 	}
 	
 	major = imajor(file_inode(fil));
@@ -175,7 +175,7 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 		break;
 	default:
 		pr_err("invalid minor value\n");
-		return -EINVAL;
+		return -EBADRQC;
 		break;
 	}
 
@@ -197,7 +197,7 @@ static ssize_t my_write(struct file *fil, const char *buff, size_t len, loff_t *
 	short count;
 	if (len >= MAX_MESSAGE_LEN || len < 0) {
 		pr_err("Invalid len parameter\n");
-		return -EINVAL;
+		return -EBADRQC;
 	}
 
 	mutex_lock(&msg_lock);
