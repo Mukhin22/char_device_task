@@ -197,18 +197,23 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
    * device */
     count = copy_from_user(msg, buff, len);
 
-    if (msg[0] == '1') {
-        if (minor == 0)
+    if (msg[0] == 1) {
+        if (minor == 0) {
             gpio_set_value(RED_LED_PIN, 1); // RED_LED_PIN 0 ON
-        if (minor == 1)
+        }
+        if (minor == 1) {
             gpio_set_value(BLUE_LED_PIN, 1); // BLUE_LED_PIN 1 ON
-    } else if (msg[0] == '0') {
-        if (minor == 0)
+        }
+    } else if (msg[0] == 0) {
+        if (minor == 0) {
             gpio_set_value(RED_LED_PIN, 0); // RED_LED_PIN 0 OFF
-        if (minor == 1)
+        }
+        if (minor == 1) {
             gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
-    } else
+        }
+    } else {
         pr_err("Unknown command , 1 or 0 \n");
+    }
     mutex_unlock(&msg_lock);
 
     return len;
