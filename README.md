@@ -41,7 +41,14 @@ from current directory:
 	ls /dev/* | grep 'LED_CTRL'
 
 7. Check the module is working with commands
+ - For red led:
 
-    *echo 1 > /dev/LED_CTRL*
+    *echo -en "\x01" > /dev/LED_CTRL*
     
-    *echo 0 > /dev/LED_CTRL*
+    *echo -en "\x00" > /dev/LED_CTRL*
+
+ - For blue led:
+
+    *echo -en "\x01" > /dev/LED_CTRL1*
+    
+    *echo -en "\x00" > /dev/LED_CTRL1*
