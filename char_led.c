@@ -165,7 +165,6 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
     default:
         pr_err("invalid minor value\n");
         return -EBADRQC;
-        break;
     }
 
     count = copy_to_user(buff, &led_value, len);
