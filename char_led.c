@@ -54,7 +54,7 @@ int __init init_module(void)
 {
 	dev_t devno;
 	unsigned int count = MY_DEV_COUNT;
-	int err;
+	int err = 0;
 
 	devno = MKDEV(MY_MAJOR, MY_MINOR);
 	register_chrdev_region(devno, count , GPIO_ANY_GPIO_DEVICE_DESC);
@@ -63,17 +63,20 @@ int __init init_module(void)
 	if (msg == NULL) {
 		pr_info("Allocation failed.\n");
 		mutex_unlock(&msg_lock);
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto out;
 	}
 	mutex_unlock(&msg_lock);
 
 	if (!gpio_is_valid(RED_LED_PIN)) {
 		pr_err("Invalid RED_LED_PIN\n");
-		return -ENODEV;
+		err = -ENODEV;
+		goto out;
 	}
 	if (!gpio_is_valid(BLUE_LED_PIN)) {
 		pr_err("Invalid RED_LED_PIN\n");
-		return -ENODEV;
+		err = -ENODEV;
+		goto out;
 	}
 
 	gpio_request(RED_LED_PIN, "sysfs");
@@ -84,18 +87,21 @@ int __init init_module(void)
 
 	cdev_init(&my_cdev, &my_fops);
 	my_cdev.owner = THIS_MODULE;
+	
 	err = cdev_add(&my_cdev, devno, count);
-
 	if (err < 0) {
 		pr_err("Device Add Error\n");
-		return -ENODEV;
+		goto out;
 	}
 
 	pr_info("This is my led control char driver\n");
 	pr_info("'mknod /dev/LED_CTRL0 c %d 0'.\n", MY_MAJOR);
 	pr_info("'mknod /dev/LED_CTRL1 c %d 1'.\n", MY_MAJOR);
-
-	return 0;
+out:
+	if (msg && err) {
+        kfree(msg);
+	}
+	return err;
 }
 
 void __exit cleanup_module(void)
