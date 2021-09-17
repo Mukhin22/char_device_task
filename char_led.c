@@ -58,7 +58,7 @@ int __init init_module(void)
 
     devno = MKDEV(MY_MAJOR, MY_MINOR);
     register_chrdev_region(devno, count, GPIO_ANY_GPIO_DEVICE_DESC);
-    mutex_lock(&msg_lock);
+
     msg = (char *)kmalloc(MAX_MESSAGE_LEN, GFP_KERNEL);
     if (msg == NULL) {
         pr_info("Allocation failed.\n");
@@ -66,7 +66,6 @@ int __init init_module(void)
         err = -ENOMEM;
         goto out;
     }
-    mutex_unlock(&msg_lock);
 
     if (!gpio_is_valid(RED_LED_PIN)) {
         pr_err("Invalid RED_LED_PIN\n");
