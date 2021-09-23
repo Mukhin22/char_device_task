@@ -26,6 +26,7 @@
 #define MY_MAJOR        200
 #define MY_MINOR        0
 #define MY_DEV_COUNT    2
+#define R_W_BUFF_LEN    1
 
 #define GPIO_ANY_GPIO_DEVICE_DESC "LED_CTRL"
 
@@ -62,7 +63,6 @@ int __init init_module(void)
     msg = (char *)kmalloc(MAX_MESSAGE_LEN, GFP_KERNEL);
     if (msg == NULL) {
         pr_info("Allocation failed.\n");
-        mutex_unlock(&msg_lock);
         err = -ENOMEM;
         goto out;
     }
@@ -143,9 +143,9 @@ static int my_open(struct inode *inod, struct file *fil)
  * */
 static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 {
-    int   major, minor;
     char  led_value;
     short count;
+    int   major, minor;
 
     if (len >= MAX_MESSAGE_LEN || len < 0) {
         pr_err("Invalid len parameter\n");
@@ -167,14 +167,19 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
         return -EBADRQC;
     }
 
-    count = copy_to_user(buff, &led_value, len);
+    count = copy_to_user(buff, &led_value, R_W_BUFF_LEN);
+    if (unlikely(count)) {
+        pr_err("Copy to user in read failed\n");
+        return -EAGAIN;
+    }
+
     pr_info("GPIO%d=%d, GPIO%d=%d\n",
             RED_LED_PIN,
             gpio_get_value(RED_LED_PIN),
             BLUE_LED_PIN,
             gpio_get_value(BLUE_LED_PIN));
 
-    return len;
+    return R_W_BUFF_LEN;
 }
 
 static ssize_t
@@ -182,6 +187,7 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 {
     int   minor;
     short count;
+
     if (len >= MAX_MESSAGE_LEN || len < 0) {
         pr_err("Invalid len parameter\n");
         return -EBADRQC;
@@ -193,8 +199,11 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     minor = iminor(file_inode(fil));
     /* copy the string from the user space program which open and write this
    * device */
-    count = copy_from_user(msg, buff, len);
-
+    count = copy_from_user(msg, buff, R_W_BUFF_LEN);
+    if (unlikely(count)) {
+        pr_err("copy_from_user failed, not copied bytes len is %d", count);
+        return -EAGAIN;
+    }
     if (msg[0] == 1) {
         if (minor == 0) {
             gpio_set_value(RED_LED_PIN, 1); // RED_LED_PIN 0 ON
@@ -214,7 +223,7 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     }
     mutex_unlock(&msg_lock);
 
-    return len;
+    return R_W_BUFF_LEN;
 }
 
 static int my_close(struct inode *inod, struct file *fil)
