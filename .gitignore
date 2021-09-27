@@ -1,0 +1,8 @@
+*.o
+*.mod
+*.ko
+*.symvers
+*.order
+*.mod.c
+.vscode/
+char_led.c
