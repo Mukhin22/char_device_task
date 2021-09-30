@@ -39,6 +39,19 @@ static ssize_t my_read(struct file *, char *, size_t, loff_t *);
 static ssize_t my_write(struct file *, const char *, size_t, loff_t *);
 static int     my_close(struct inode *, struct file *);
 
+struct led_blink_ops {
+    uint16_t interval_ms;
+    uint16_t blinks_num;
+};
+
+#define DEF_INTERVAL  500
+#define DEF_BLINK_NUM 5
+
+#define DEF_BLINK_OPS                                            \
+    {                                                            \
+        .interval_ms = DEF_INTERVAL, .blinks_num = DEF_BLINK_NUM \
+    }
+
 static struct file_operations my_fops = {
     read: my_read,
     write: my_write,
@@ -50,6 +63,7 @@ static struct file_operations my_fops = {
 static char *      msg = NULL;
 static struct cdev my_cdev;
 static DEFINE_MUTEX(msg_lock);
+static struct led_blink_ops bl_ops = DEF_BLINK_OPS;
 
 int __init init_module(void)
 {
