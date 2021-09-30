@@ -19,6 +19,8 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
+#include <linux/ctype.h>
 
 #define RED_LED_PIN     16
 #define BLUE_LED_PIN    20
@@ -39,17 +41,30 @@ static ssize_t my_read(struct file *, char *, size_t, loff_t *);
 static ssize_t my_write(struct file *, const char *, size_t, loff_t *);
 static int     my_close(struct inode *, struct file *);
 
+typedef enum { TURN_OFF, TURN_ON, TURN_BLINK } commands;
+
 struct led_blink_ops {
     uint16_t interval_ms;
     uint16_t blinks_num;
+    commands cmd;
 };
 
 #define DEF_INTERVAL  500
 #define DEF_BLINK_NUM 5
 
-#define DEF_BLINK_OPS                                            \
-    {                                                            \
-        .interval_ms = DEF_INTERVAL, .blinks_num = DEF_BLINK_NUM \
+#define MAX_TIMES_TO_BLINK 1
+#define MIN_TIMES_TO_BLINK 100
+
+#define MAX_INTER_MS   100
+#define MIN_INTER_MS   2500
+#define MAX_BLINK_ARGS 3
+#define RED_LED_MINOR  1
+#define BLUE_LED_MINOR 0
+
+#define DEF_BLINK_OPS                                             \
+    {                                                             \
+        .interval_ms = DEF_INTERVAL, .blinks_num = DEF_BLINK_NUM, \
+        .cmd = TURN_OFF                                           \
     }
 
 static struct file_operations my_fops = {
@@ -64,6 +79,112 @@ static char *      msg = NULL;
 static struct cdev my_cdev;
 static DEFINE_MUTEX(msg_lock);
 static struct led_blink_ops bl_ops = DEF_BLINK_OPS;
+
+static int parse_blink_ops(const char *buff)
+{
+    int  err     = 0;
+    int  arg_num = 0;
+    long param;
+    while (*buff && (arg_num < MAX_BLINK_ARGS)) {
+        if (isdigit(*buff)) {
+            arg_num++;
+            err = kstrtol(buff, 10, &param);
+            if (err) {
+                pr_err("Error in conversion of args\n");
+                goto out;
+            }
+            switch (arg_num) {
+            case 2:
+                if ((param > MAX_TIMES_TO_BLINK) ||
+                    (param < MIN_TIMES_TO_BLINK)) {
+                    pr_err("Wrong times to blink parameter used\n");
+                    err = -EINVAL;
+                    goto out;
+                }
+                bl_ops.blinks_num = param;
+                pr_info("Blinks num parameter used is %ld", param);
+                break;
+            case 3:
+                if ((param > MAX_INTER_MS) || (param < MIN_INTER_MS)) {
+                    pr_err("Wrong blink inetral parameter used\n");
+                    err = -EINVAL;
+                    goto out;
+                }
+                bl_ops.interval_ms = param;
+                pr_info("Interval ms parameter used is %ld", param);
+                goto out;
+            default:
+                break;
+            }
+        } else {
+            buff++;
+        }
+    }
+out:
+    if (err) {
+        pr_err("Error during blink args parsing\n");
+    }
+    return err;
+}
+
+static int buff_parser(const char *buff, size_t len)
+{
+    int    err = 0;
+    size_t i;
+    pr_info("Buff element len is %d \n", len);
+    pr_info("Buff elements are : \n");
+    for (i = 0; i < len; i++) {
+        printk("%d", buff[i]);
+    }
+
+    switch (buff[0]) {
+    case TURN_OFF:
+        bl_ops.cmd = TURN_OFF;
+        break;
+    case TURN_ON:
+        bl_ops.cmd = TURN_ON;
+        break;
+    case TURN_BLINK:
+        pr_info("Blinking turned \n");
+        err = parse_blink_ops(buff);
+        if (err) {
+            goto out;
+        }
+        bl_ops.cmd = TURN_BLINK;
+        break;
+    default:
+        err = -EINVAL;
+        break;
+    }
+
+out:
+    if (err < 0) {
+        pr_err("Error occured during message parsing \n");
+    }
+    return err;
+}
+
+static void blink_leds(const int minor)
+{
+    int i = 0;
+    if (RED_LED_MINOR == minor) {
+        for (i = 0; i < bl_ops.blinks_num; i++) {
+            pr_info("BLinking led now\n");
+            gpio_set_value(RED_LED_PIN, 1);
+            msleep(bl_ops.interval_ms);
+            gpio_set_value(RED_LED_PIN, 0);
+        }
+        bl_ops.cmd = TURN_OFF;
+    }
+    if (BLUE_LED_MINOR == minor) {
+        for (i = 0; i < bl_ops.blinks_num; i++) {
+            gpio_set_value(BLUE_LED_PIN, 1);
+            msleep(bl_ops.interval_ms);
+            gpio_set_value(BLUE_LED_PIN, 0);
+        }
+        bl_ops.cmd = TURN_OFF;
+    }
+}
 
 int __init init_module(void)
 {
@@ -201,7 +322,7 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 {
     int   minor;
     short count;
-
+    int   err = 0;
     if (len >= MAX_MESSAGE_LEN || len < 0) {
         pr_err("Invalid len parameter\n");
         return -EBADRQC;
@@ -213,31 +334,48 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     minor = iminor(file_inode(fil));
     /* copy the string from the user space program which open and write this
    * device */
-    count = copy_from_user(msg, buff, R_W_BUFF_LEN);
+    count = copy_from_user(msg, buff, len);
     if (unlikely(count)) {
         pr_err("copy_from_user failed, not copied bytes len is %d", count);
         return -EAGAIN;
     }
-    if (msg[0] == 1) {
+
+    err = buff_parser(msg, len);
+    if (err) {
+        goto out;
+    }
+
+    if (bl_ops.cmd == TURN_ON) {
         if (minor == 0) {
+            pr_info("enable red led \n");
             gpio_set_value(RED_LED_PIN, 1); // RED_LED_PIN 0 ON
         }
         if (minor == 1) {
+            pr_info("enable blue led \n");
             gpio_set_value(BLUE_LED_PIN, 1); // BLUE_LED_PIN 1 ON
         }
-    } else if (msg[0] == 0) {
+    } else if (bl_ops.cmd == TURN_OFF) {
         if (minor == 0) {
+            pr_info("disable red led \n");
             gpio_set_value(RED_LED_PIN, 0); // RED_LED_PIN 0 OFF
         }
         if (minor == 1) {
+            pr_info("disable red led \n");
             gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
         }
+    } else if (bl_ops.cmd == TURN_BLINK) {
+        blink_leds(minor);
     } else {
         pr_err("Unknown command , 1 or 0 \n");
     }
-    mutex_unlock(&msg_lock);
 
-    return R_W_BUFF_LEN;
+out:
+    if (err) {
+        pr_err("Write function failed\n");
+        len = 0;
+    }
+    mutex_unlock(&msg_lock);
+    return len;
 }
 
 static int my_close(struct inode *inod, struct file *fil)
