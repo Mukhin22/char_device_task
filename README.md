@@ -43,12 +43,11 @@ from current directory:
 7. Check the module is working with commands
  - For red led:
 
-    *echo -en "\x01" > /dev/LED_CTRL*
+    **
     
-    *echo -en "\x00" > /dev/LED_CTRL*
+    *sudo bash ./test.sh 0 10 200*
 
  - For blue led:
 
-    *echo -en "\x01" > /dev/LED_CTRL1*
-    
-    *echo -en "\x00" > /dev/LED_CTRL1*
+   *sudo bash ./test.sh 1 10 200*
+
