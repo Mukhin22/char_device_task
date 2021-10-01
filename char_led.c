@@ -44,8 +44,8 @@ static int     my_close(struct inode *, struct file *);
 typedef enum { TURN_OFF, TURN_ON, TURN_BLINK } commands;
 
 struct led_blink_ops {
-    uint16_t interval_ms;
-    uint16_t blinks_num;
+    long     interval_ms;
+    long     blinks_num;
     commands cmd;
 };
 
@@ -92,6 +92,10 @@ static void print_ops_buff(const char *buff, size_t len)
 
 static int check_cmd(long param)
 {
+    pr_info("Setting the command possible values are : %d, %d, %d \n",
+            TURN_OFF,
+            TURN_ON,
+            TURN_BLINK);
     if (param < 0 || param > 2) {
         pr_err("Wrong command used %ld\n", param);
         return -EINVAL;
@@ -106,6 +110,7 @@ static int check_cmd(long param)
         bl_ops.cmd = TURN_ON;
         break;
     case TURN_BLINK:
+        pr_info("cmd to TURN_BLINK recognized\n");
         bl_ops.cmd = TURN_BLINK;
         break;
     default:
@@ -129,7 +134,7 @@ static int parse_cmd_buff(const char *buff, size_t len)
         if (isdigit(*str_buff)) {
             arg_num++;
             param = simple_strtol(str_buff, &str_buff, 10);
-            pr_info("Current parameter parsed value is %ld", param);
+            pr_info("parameter number %d parsed value is %ld", arg_num, param);
             switch (arg_num) {
             case 1:
                 err = check_cmd(param);
@@ -178,20 +183,28 @@ out:
 
 static void blink_leds(const int minor)
 {
-    int i = 0;
+    long i;
+    pr_info("Used minor to blink %d, used blinks numver is %ld\n",
+            minor,
+            bl_ops.blinks_num);
     if (RED_LED_MINOR == minor) {
         for (i = 0; i < bl_ops.blinks_num; i++) {
-            pr_info("BLinking led now\n");
+            pr_info("BLinking RED led now with interval %ld ms\n",
+                    bl_ops.interval_ms);
+            msleep((unsigned int)bl_ops.interval_ms);
             gpio_set_value(RED_LED_PIN, 1);
-            msleep(bl_ops.interval_ms);
+            msleep((unsigned int)bl_ops.interval_ms);
             gpio_set_value(RED_LED_PIN, 0);
         }
         bl_ops.cmd = TURN_OFF;
     }
     if (BLUE_LED_MINOR == minor) {
         for (i = 0; i < bl_ops.blinks_num; i++) {
+            pr_info("BLinking blue led now with interval %ld ms\n",
+                    bl_ops.interval_ms);
+            msleep((unsigned int)bl_ops.interval_ms);
             gpio_set_value(BLUE_LED_PIN, 1);
-            msleep(bl_ops.interval_ms);
+            msleep((unsigned int)bl_ops.interval_ms);
             gpio_set_value(BLUE_LED_PIN, 0);
         }
         bl_ops.cmd = TURN_OFF;
@@ -376,6 +389,7 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
             gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
         }
     } else if (bl_ops.cmd == TURN_BLINK) {
+        pr_info("Write command used is BLINK. Executing\n");
         blink_leds(minor);
     } else {
         pr_err("Unknown command , 1 or 0 \n");
