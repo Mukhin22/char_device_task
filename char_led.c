@@ -52,11 +52,11 @@ struct led_blink_ops {
 #define DEF_INTERVAL  500
 #define DEF_BLINK_NUM 5
 
-#define MAX_TIMES_TO_BLINK 1
-#define MIN_TIMES_TO_BLINK 100
+#define MAX_TIMES_TO_BLINK 100
+#define MIN_TIMES_TO_BLINK 1
 
-#define MAX_INTER_MS   100
-#define MIN_INTER_MS   2500
+#define MAX_INTER_MS   2500
+#define MIN_INTER_MS   100
 #define MAX_BLINK_ARGS 3
 #define RED_LED_MINOR  1
 #define BLUE_LED_MINOR 0
@@ -80,20 +80,66 @@ static struct cdev my_cdev;
 static DEFINE_MUTEX(msg_lock);
 static struct led_blink_ops bl_ops = DEF_BLINK_OPS;
 
-static int parse_blink_ops(const char *buff)
+static void print_ops_buff(const char *buff, size_t len)
 {
-    int  err     = 0;
-    int  arg_num = 0;
-    long param;
-    while (*buff && (arg_num < MAX_BLINK_ARGS)) {
-        if (isdigit(*buff)) {
+    size_t i;
+    pr_info("Buff element len is %d \n", len);
+    pr_info("Buff elements are : \n");
+    for (i = 0; i < len; i++) {
+        printk("%d", buff[i]);
+    }
+}
+
+static int check_cmd(long param)
+{
+    if (param < 0 || param > 2) {
+        pr_err("Wrong command used %ld\n", param);
+        return -EINVAL;
+    }
+    switch (param) {
+    case TURN_OFF:
+        pr_info("cmd to TURN_OFF recognized\n");
+        bl_ops.cmd = TURN_OFF;
+        break;
+    case TURN_ON:
+        pr_info("cmd to TURN_ON recognized\n");
+        bl_ops.cmd = TURN_ON;
+        break;
+    case TURN_BLINK:
+        bl_ops.cmd = TURN_BLINK;
+        break;
+    default:
+        pr_err("Unrecognized param \n");
+        return -EINVAL;
+    }
+    return 0;
+}
+static int parse_cmd_buff(const char *buff, size_t len)
+{
+    int   err     = 0;
+    int   arg_num = 0;
+    long  param;
+    char *str_buff;
+    print_ops_buff(buff, len);
+    str_buff = (char *)kmalloc((len + 1), GFP_KERNEL);
+    strncpy(str_buff, buff, len);
+    str_buff[len] = '\0';
+    pr_info("string buffer is: %s \n", str_buff);
+    while (*str_buff) {
+        if (isdigit(*str_buff)) {
             arg_num++;
-            err = kstrtol(buff, 10, &param);
-            if (err) {
-                pr_err("Error in conversion of args\n");
-                goto out;
-            }
+            param = simple_strtol(str_buff, &str_buff, 10);
+            pr_info("Current parameter parsed value is %ld", param);
             switch (arg_num) {
+            case 1:
+                err = check_cmd(param);
+                if (err) {
+                    goto out;
+                }
+                if (bl_ops.cmd != TURN_BLINK) {
+                    goto out;
+                }
+                break;
             case 2:
                 if ((param > MAX_TIMES_TO_BLINK) ||
                     (param < MIN_TIMES_TO_BLINK)) {
@@ -117,49 +163,15 @@ static int parse_blink_ops(const char *buff)
                 break;
             }
         } else {
-            buff++;
+            str_buff++;
         }
     }
 out:
     if (err) {
         pr_err("Error during blink args parsing\n");
     }
-    return err;
-}
-
-static int buff_parser(const char *buff, size_t len)
-{
-    int    err = 0;
-    size_t i;
-    pr_info("Buff element len is %d \n", len);
-    pr_info("Buff elements are : \n");
-    for (i = 0; i < len; i++) {
-        printk("%d", buff[i]);
-    }
-
-    switch (buff[0]) {
-    case TURN_OFF:
-        bl_ops.cmd = TURN_OFF;
-        break;
-    case TURN_ON:
-        bl_ops.cmd = TURN_ON;
-        break;
-    case TURN_BLINK:
-        pr_info("Blinking turned \n");
-        err = parse_blink_ops(buff);
-        if (err) {
-            goto out;
-        }
-        bl_ops.cmd = TURN_BLINK;
-        break;
-    default:
-        err = -EINVAL;
-        break;
-    }
-
-out:
-    if (err < 0) {
-        pr_err("Error occured during message parsing \n");
+    if (str_buff) {
+        kfree(str_buff);
     }
     return err;
 }
@@ -339,8 +351,8 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
         pr_err("copy_from_user failed, not copied bytes len is %d", count);
         return -EAGAIN;
     }
-
-    err = buff_parser(msg, len);
+    print_ops_buff(buff, len);
+    err = parse_cmd_buff(msg, len);
     if (err) {
         goto out;
     }
