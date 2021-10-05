@@ -21,6 +21,8 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/ctype.h>
+#include <linux/kthread.h>
+#include <linux/wait.h>
 
 #define RED_LED_PIN     16
 #define BLUE_LED_PIN    20
@@ -47,6 +49,7 @@ struct led_blink_ops {
     long     interval_ms;
     long     blinks_num;
     commands cmd;
+    int      minor;
 };
 
 #define DEF_INTERVAL  500
@@ -60,11 +63,11 @@ struct led_blink_ops {
 #define MAX_BLINK_ARGS 3
 #define RED_LED_MINOR  1
 #define BLUE_LED_MINOR 0
-
+#define FAKE_MINOR     2
 #define DEF_BLINK_OPS                                             \
     {                                                             \
         .interval_ms = DEF_INTERVAL, .blinks_num = DEF_BLINK_NUM, \
-        .cmd = TURN_OFF                                           \
+        .cmd = TURN_OFF, .minor = FAKE_MINOR                      \
     }
 
 static struct file_operations my_fops = {
@@ -79,7 +82,11 @@ static char *      msg = NULL;
 static struct cdev my_cdev;
 static DEFINE_MUTEX(msg_lock);
 static struct led_blink_ops bl_ops = DEF_BLINK_OPS;
+static struct task_struct * blinks_wait_thread;
 
+DECLARE_WAIT_QUEUE_HEAD(task_q);
+
+#ifdef TEST_PRINT_BUFF
 static void print_ops_buff(const char *buff, size_t len)
 {
     size_t i;
@@ -89,6 +96,7 @@ static void print_ops_buff(const char *buff, size_t len)
         printk("%d", buff[i]);
     }
 }
+#endif
 
 static int check_cmd(long param)
 {
@@ -125,11 +133,15 @@ static int parse_cmd_buff(const char *buff, size_t len)
     int   arg_num = 0;
     long  param;
     char *str_buff;
+#ifdef TEST_PRINT_BUFF
     print_ops_buff(buff, len);
+#endif
     str_buff = (char *)kmalloc((len + 1), GFP_KERNEL);
     strncpy(str_buff, buff, len);
     str_buff[len] = '\0';
+#ifdef TEST_PRINT_BUFF
     pr_info("string buffer is: %s \n", str_buff);
+#endif
     while (*str_buff) {
         if (isdigit(*str_buff)) {
             arg_num++;
@@ -181,34 +193,43 @@ out:
     return err;
 }
 
-static void blink_leds(const int minor)
+static int wait_blink_leds(void *unused)
 {
     long i;
-    pr_info("Used minor to blink %d, used blinks numver is %ld\n",
-            minor,
-            bl_ops.blinks_num);
-    if (RED_LED_MINOR == minor) {
-        for (i = 0; i < bl_ops.blinks_num; i++) {
-            pr_info("BLinking RED led now with interval %ld ms\n",
-                    bl_ops.interval_ms);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(RED_LED_PIN, 1);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(RED_LED_PIN, 0);
+    while (1) {
+        wait_event_interruptible(task_q, FAKE_MINOR != bl_ops.minor);
+
+        pr_info("Used minor to blink %d, used blinks number is %ld\n",
+                bl_ops.minor,
+                bl_ops.blinks_num);
+        if (RED_LED_MINOR == bl_ops.minor) {
+            for (i = 0; i < bl_ops.blinks_num; i++) {
+                pr_info("BLinking RED led now with interval %ld ms\n",
+                        bl_ops.interval_ms);
+                msleep((unsigned int)bl_ops.interval_ms);
+                gpio_set_value(RED_LED_PIN, 1);
+                msleep((unsigned int)bl_ops.interval_ms);
+                gpio_set_value(RED_LED_PIN, 0);
+            }
         }
-        bl_ops.cmd = TURN_OFF;
-    }
-    if (BLUE_LED_MINOR == minor) {
-        for (i = 0; i < bl_ops.blinks_num; i++) {
-            pr_info("BLinking blue led now with interval %ld ms\n",
-                    bl_ops.interval_ms);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(BLUE_LED_PIN, 1);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(BLUE_LED_PIN, 0);
+        if (BLUE_LED_MINOR == bl_ops.minor) {
+            for (i = 0; i < bl_ops.blinks_num; i++) {
+                pr_info("BLinking blue led now with interval %ld ms\n",
+                        bl_ops.interval_ms);
+                msleep((unsigned int)bl_ops.interval_ms);
+                gpio_set_value(BLUE_LED_PIN, 1);
+                msleep((unsigned int)bl_ops.interval_ms);
+                gpio_set_value(BLUE_LED_PIN, 0);
+            }
         }
-        bl_ops.cmd = TURN_OFF;
+        bl_ops.blinks_num  = DEF_BLINK_NUM;
+        bl_ops.cmd         = TURN_OFF;
+        bl_ops.interval_ms = DEF_INTERVAL;
+        bl_ops.minor       = FAKE_MINOR;
     }
+    do_exit(0);
+
+    return 0;
 }
 
 int __init init_module(void)
@@ -253,6 +274,16 @@ int __init init_module(void)
         goto out;
     }
 
+    blinks_wait_thread =
+            kthread_create(wait_blink_leds, NULL, "BlinksWaitThread");
+    if (blinks_wait_thread) {
+        pr_info("Thread Created successfully\n");
+        wake_up_process(blinks_wait_thread);
+    } else {
+        pr_info("Thread creation failed\n");
+        err = EFAULT;
+        goto out;
+    }
     pr_info("This is my led control char driver\n");
     pr_info("'mknod /dev/LED_CTRL0 c %d 0'.\n", MY_MAJOR);
     pr_info("'mknod /dev/LED_CTRL1 c %d 1'.\n", MY_MAJOR);
@@ -267,7 +298,7 @@ void __exit cleanup_module(void)
 {
     dev_t devno;
     pr_info("Deinit char led driver\n");
-
+    //kthread_stop(blinks_wait_thread);
     gpio_set_value(RED_LED_PIN, 0);
     gpio_set_value(BLUE_LED_PIN, 0);
     gpio_free(RED_LED_PIN);
@@ -364,7 +395,9 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
         pr_err("copy_from_user failed, not copied bytes len is %d", count);
         return -EAGAIN;
     }
+#ifdef TEST_PRINT_BUFF
     print_ops_buff(buff, len);
+#endif
     err = parse_cmd_buff(msg, len);
     if (err) {
         goto out;
@@ -389,8 +422,9 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
             gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
         }
     } else if (bl_ops.cmd == TURN_BLINK) {
+        bl_ops.minor = minor;
         pr_info("Write command used is BLINK. Executing\n");
-        blink_leds(minor);
+        wake_up_interruptible(&task_q);
     } else {
         pr_err("Unknown command , 1 or 0 \n");
     }
