@@ -43,7 +43,7 @@ static ssize_t my_read(struct file *, char *, size_t, loff_t *);
 static ssize_t my_write(struct file *, const char *, size_t, loff_t *);
 static int     my_close(struct inode *, struct file *);
 
-typedef enum { TURN_OFF, TURN_ON, TURN_BLINK } commands;
+typedef enum { TURN_OFF, TURN_ON, TURN_BLINK, NO_CMD } commands;
 
 struct led_blink_ops {
     long     interval_ms;
@@ -67,7 +67,7 @@ struct led_blink_ops {
 #define DEF_BLINK_OPS                                             \
     {                                                             \
         .interval_ms = DEF_INTERVAL, .blinks_num = DEF_BLINK_NUM, \
-        .cmd = TURN_OFF, .minor = FAKE_MINOR                      \
+        .cmd = NO_CMD, .minor = FAKE_MINOR                        \
     }
 
 static struct file_operations my_fops = {
@@ -83,6 +83,8 @@ static struct cdev my_cdev;
 static DEFINE_MUTEX(msg_lock);
 static struct led_blink_ops bl_ops = DEF_BLINK_OPS;
 static struct task_struct * blinks_wait_thread;
+static struct task_struct * blinks_off_thread;
+static struct task_struct * blinks_on_thread;
 
 DECLARE_WAIT_QUEUE_HEAD(task_q);
 
@@ -115,7 +117,9 @@ static int check_cmd(long param)
         break;
     case TURN_ON:
         pr_info("cmd to TURN_ON recognized\n");
-        bl_ops.cmd = TURN_ON;
+        if (bl_ops.cmd != TURN_BLINK) {
+            bl_ops.cmd = TURN_ON;
+        }
         break;
     case TURN_BLINK:
         pr_info("cmd to TURN_BLINK recognized\n");
@@ -192,18 +196,65 @@ out:
     }
     return err;
 }
+static int turn_led_off(void *unused)
+{
+    while (!kthread_should_stop()) {
+        wait_event_interruptible(
+                task_q, (bl_ops.cmd == TURN_OFF) || kthread_should_stop());
+        if (kthread_should_stop()) {
+            break;
+        }
+        if (bl_ops.minor == 0) {
+            pr_info("disable red led \n");
+            gpio_set_value(RED_LED_PIN, 0); // RED_LED_PIN 0 OFF
+        }
+        if (bl_ops.minor == 1) {
+            pr_info("disable blue led \n");
+            gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
+        }
+        bl_ops.cmd = NO_CMD;
+    }
+    do_exit(0);
 
+    return 0;
+}
+static int turn_led_on(void *unused)
+{
+    while (!kthread_should_stop()) {
+        wait_event_interruptible(
+                task_q, (bl_ops.cmd == TURN_ON) || kthread_should_stop());
+        if (kthread_should_stop()) {
+            break;
+        }
+        if (bl_ops.minor == 0) {
+            pr_info("enable red led \n");
+            gpio_set_value(RED_LED_PIN, 1); // RED_LED_PIN 0 ON
+        }
+        if (bl_ops.minor == 1) {
+            pr_info("enable blue led \n");
+            gpio_set_value(BLUE_LED_PIN, 1); // BLUE_LED_PIN 1 ON
+        }
+        bl_ops.cmd = NO_CMD;
+    }
+    do_exit(0);
+
+    return 0;
+}
 static int wait_blink_leds(void *unused)
 {
     long i;
-    while (1) {
-        wait_event_interruptible(task_q, FAKE_MINOR != bl_ops.minor);
-
+    while (!kthread_should_stop()) {
+        wait_event_interruptible(
+                task_q, (bl_ops.cmd == TURN_BLINK) || kthread_should_stop());
+        if (kthread_should_stop()) {
+            break;
+        }
         pr_info("Used minor to blink %d, used blinks number is %ld\n",
                 bl_ops.minor,
                 bl_ops.blinks_num);
         if (RED_LED_MINOR == bl_ops.minor) {
-            for (i = 0; i < bl_ops.blinks_num; i++) {
+            for (i = 0; (i < bl_ops.blinks_num) && (bl_ops.cmd == TURN_BLINK);
+                 i++) {
                 pr_info("BLinking RED led now with interval %ld ms\n",
                         bl_ops.interval_ms);
                 msleep((unsigned int)bl_ops.interval_ms);
@@ -213,7 +264,8 @@ static int wait_blink_leds(void *unused)
             }
         }
         if (BLUE_LED_MINOR == bl_ops.minor) {
-            for (i = 0; i < bl_ops.blinks_num; i++) {
+            for (i = 0; (i < bl_ops.blinks_num) && (bl_ops.cmd == TURN_BLINK);
+                 i++) {
                 pr_info("BLinking blue led now with interval %ld ms\n",
                         bl_ops.interval_ms);
                 msleep((unsigned int)bl_ops.interval_ms);
@@ -223,15 +275,49 @@ static int wait_blink_leds(void *unused)
             }
         }
         bl_ops.blinks_num  = DEF_BLINK_NUM;
-        bl_ops.cmd         = TURN_OFF;
+        bl_ops.cmd         = NO_CMD;
         bl_ops.interval_ms = DEF_INTERVAL;
-        bl_ops.minor       = FAKE_MINOR;
     }
     do_exit(0);
 
     return 0;
 }
+static int leds_create_threads(void)
+{
+    int err = 0;
+    blinks_wait_thread =
+            kthread_create(wait_blink_leds, NULL, "BlinksWaitThread");
+    if (blinks_wait_thread) {
+        pr_info("blinks_wait_thread Created successfully\n");
+        wake_up_process(blinks_wait_thread);
+    } else {
+        pr_info("blinks_wait_thread creation failed\n");
+        err = -EFAULT;
+        goto out;
+    }
 
+    blinks_on_thread = kthread_create(turn_led_on, NULL, "blinks_on_thread");
+    if (blinks_on_thread) {
+        pr_info("blinks_on_thread Created successfully\n");
+        wake_up_process(blinks_on_thread);
+    } else {
+        pr_info("blinks_on_thread creation failed\n");
+        err = -EFAULT;
+        goto out;
+    }
+
+    blinks_off_thread = kthread_create(turn_led_off, NULL, "blinks_off_thread");
+    if (blinks_off_thread) {
+        pr_info("blinks_off_thread Created successfully\n");
+        wake_up_process(blinks_off_thread);
+    } else {
+        pr_info("blinks_off_thread creation failed\n");
+        err = -EFAULT;
+        goto out;
+    }
+out:
+    return err;
+}
 int __init init_module(void)
 {
     dev_t        devno;
@@ -273,15 +359,9 @@ int __init init_module(void)
         pr_err("Device Add Error\n");
         goto out;
     }
-
-    blinks_wait_thread =
-            kthread_create(wait_blink_leds, NULL, "BlinksWaitThread");
-    if (blinks_wait_thread) {
-        pr_info("Thread Created successfully\n");
-        wake_up_process(blinks_wait_thread);
-    } else {
-        pr_info("Thread creation failed\n");
-        err = EFAULT;
+    err = leds_create_threads();
+    if (err) {
+        pr_err("Failed to create threads \n");
         goto out;
     }
     pr_info("This is my led control char driver\n");
@@ -298,7 +378,10 @@ void __exit cleanup_module(void)
 {
     dev_t devno;
     pr_info("Deinit char led driver\n");
-    //kthread_stop(blinks_wait_thread);
+    kthread_stop(blinks_wait_thread);
+    kthread_stop(blinks_off_thread);
+    kthread_stop(blinks_on_thread);
+
     gpio_set_value(RED_LED_PIN, 0);
     gpio_set_value(BLUE_LED_PIN, 0);
     gpio_free(RED_LED_PIN);
@@ -402,27 +485,13 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     if (err) {
         goto out;
     }
+    bl_ops.minor = minor;
 
     if (bl_ops.cmd == TURN_ON) {
-        if (minor == 0) {
-            pr_info("enable red led \n");
-            gpio_set_value(RED_LED_PIN, 1); // RED_LED_PIN 0 ON
-        }
-        if (minor == 1) {
-            pr_info("enable blue led \n");
-            gpio_set_value(BLUE_LED_PIN, 1); // BLUE_LED_PIN 1 ON
-        }
+        wake_up_interruptible(&task_q);
     } else if (bl_ops.cmd == TURN_OFF) {
-        if (minor == 0) {
-            pr_info("disable red led \n");
-            gpio_set_value(RED_LED_PIN, 0); // RED_LED_PIN 0 OFF
-        }
-        if (minor == 1) {
-            pr_info("disable red led \n");
-            gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
-        }
+        wake_up_interruptible(&task_q);
     } else if (bl_ops.cmd == TURN_BLINK) {
-        bl_ops.minor = minor;
         pr_info("Write command used is BLINK. Executing\n");
         wake_up_interruptible(&task_q);
     } else {
