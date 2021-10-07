@@ -43,9 +43,12 @@ static int     my_open(struct inode *, struct file *);
 static ssize_t my_read(struct file *, char *, size_t, loff_t *);
 static ssize_t my_write(struct file *, const char *, size_t, loff_t *);
 static int     my_close(struct inode *, struct file *);
-static void    wait_blink_leds(struct work_struct *wait_blink);
-static void    turn_led_on(struct work_struct *turn_on);
-static void    turn_led_off(struct work_struct *turn_off);
+static void    blink_red(struct work_struct *wait_blink);
+static void    blink_blue(struct work_struct *wait_blink);
+static void    turn_on_red(struct work_struct *turn_off);
+static void    turn_on_blue(struct work_struct *turn_off);
+static void    turn_off_red(struct work_struct *turn_off);
+static void    turn_off_blue(struct work_struct *turn_off);
 
 typedef enum { TURN_OFF, TURN_ON, TURN_BLINK, NO_CMD } commands;
 
@@ -53,7 +56,6 @@ struct led_blink_ops {
     long     interval_ms;
     long     blinks_num;
     commands cmd;
-    int      minor;
 };
 
 #define DEF_INTERVAL  500
@@ -67,11 +69,10 @@ struct led_blink_ops {
 #define MAX_BLINK_ARGS 3
 #define RED_LED_MINOR  1
 #define BLUE_LED_MINOR 0
-#define FAKE_MINOR     2
 #define DEF_BLINK_OPS                                             \
     {                                                             \
         .interval_ms = DEF_INTERVAL, .blinks_num = DEF_BLINK_NUM, \
-        .cmd = NO_CMD, .minor = FAKE_MINOR                        \
+        .cmd = NO_CMD                                             \
     }
 
 static struct file_operations my_fops = {
@@ -85,13 +86,20 @@ static struct file_operations my_fops = {
 static char *      msg = NULL;
 static struct cdev my_cdev;
 static DEFINE_MUTEX(msg_lock);
-static struct led_blink_ops bl_ops = DEF_BLINK_OPS;
+static struct led_blink_ops bl_ops_red  = DEF_BLINK_OPS;
+static struct led_blink_ops bl_ops_blue = DEF_BLINK_OPS;
+
 static DEFINE_MUTEX(bl_mut);
 
 static struct workqueue_struct *queue;
-DECLARE_WORK(turn_off, turn_led_off);
-DECLARE_WORK(turn_on, turn_led_on);
-DECLARE_WORK(wait_blink, wait_blink_leds);
+DECLARE_WORK(turn_off_red_work, turn_off_red);
+DECLARE_WORK(turn_off_blue_work, turn_off_blue);
+
+DECLARE_WORK(turn_on_red_work, turn_on_red);
+DECLARE_WORK(turn_on_blue_work, turn_on_blue);
+
+DECLARE_WORK(blink_red_work, blink_red);
+DECLARE_WORK(blink_blue_work, blink_blue);
 
 #ifdef TEST_PRINT_BUFF
 static void print_ops_buff(const char *buff, size_t len)
@@ -105,7 +113,7 @@ static void print_ops_buff(const char *buff, size_t len)
 }
 #endif
 
-static int check_cmd(long param)
+static int check_cmd(long param, struct led_blink_ops *bl_ops)
 {
     pr_info("Setting the command possible values are : %d, %d, %d \n",
             TURN_OFF,
@@ -118,17 +126,15 @@ static int check_cmd(long param)
     switch (param) {
     case TURN_OFF:
         pr_info("cmd to TURN_OFF recognized\n");
-        bl_ops.cmd = TURN_OFF;
+        bl_ops->cmd = TURN_OFF;
         break;
     case TURN_ON:
         pr_info("cmd to TURN_ON recognized\n");
-        if (bl_ops.cmd != TURN_BLINK) {
-            bl_ops.cmd = TURN_ON;
-        }
+        bl_ops->cmd = TURN_ON;
         break;
     case TURN_BLINK:
         pr_info("cmd to TURN_BLINK recognized\n");
-        bl_ops.cmd = TURN_BLINK;
+        bl_ops->cmd = TURN_BLINK;
         break;
     default:
         pr_err("Unrecognized param \n");
@@ -136,7 +142,8 @@ static int check_cmd(long param)
     }
     return 0;
 }
-static int parse_cmd_buff(const char *buff, size_t len)
+static int
+parse_cmd_buff(const char *buff, size_t len, struct led_blink_ops *bl_ops)
 {
     int   err     = 0;
     int   arg_num = 0;
@@ -162,11 +169,11 @@ static int parse_cmd_buff(const char *buff, size_t len)
             }
             switch (arg_num) {
             case 1:
-                err = check_cmd(param);
+                err = check_cmd(param, bl_ops);
                 if (err) {
                     goto out;
                 }
-                if (bl_ops.cmd != TURN_BLINK) {
+                if (bl_ops->cmd != TURN_BLINK) {
                     goto out;
                 }
                 break;
@@ -177,7 +184,7 @@ static int parse_cmd_buff(const char *buff, size_t len)
                     err = -EINVAL;
                     goto out;
                 }
-                bl_ops.blinks_num = param;
+                bl_ops->blinks_num = param;
                 pr_info("Blinks num parameter used is %ld", param);
                 break;
             case 3:
@@ -186,7 +193,7 @@ static int parse_cmd_buff(const char *buff, size_t len)
                     err = -EINVAL;
                     goto out;
                 }
-                bl_ops.interval_ms = param;
+                bl_ops->interval_ms = param;
                 pr_info("Interval ms parameter used is %ld", param);
                 goto out;
             default:
@@ -208,67 +215,87 @@ out:
     }
     return err;
 }
-static void turn_led_off(struct work_struct *turn_off)
+static void turn_off_red(struct work_struct *turn_off)
 {
     mutex_lock(&bl_mut);
 
-    if (bl_ops.minor == 0) {
-        pr_info("disable red led \n");
-        gpio_set_value(RED_LED_PIN, 0); // RED_LED_PIN 0 OFF
-    }
-    if (bl_ops.minor == 1) {
-        pr_info("disable blue led \n");
-        gpio_set_value(BLUE_LED_PIN, 0); // BLUE_LED_PIN 1 OFF
-    }
-    bl_ops.cmd = NO_CMD;
+    pr_info("disable red led \n");
+    gpio_set_value(RED_LED_PIN, 0);
+    bl_ops_red.cmd = NO_CMD;
+
     mutex_unlock(&bl_mut);
 }
-static void turn_led_on(struct work_struct *turn_on)
+
+static void turn_off_blue(struct work_struct *turn_off)
 {
     mutex_lock(&bl_mut);
 
-    if (bl_ops.minor == 0) {
-        pr_info("enable red led \n");
-        gpio_set_value(RED_LED_PIN, 1); // RED_LED_PIN 0 ON
-    }
-    if (bl_ops.minor == 1) {
-        pr_info("enable blue led \n");
-        gpio_set_value(BLUE_LED_PIN, 1); // BLUE_LED_PIN 1 ON
-    }
+    pr_info("disable blue led \n");
+    gpio_set_value(BLUE_LED_PIN, 0);
+    bl_ops_blue.cmd = NO_CMD;
 
-    bl_ops.cmd = NO_CMD;
     mutex_unlock(&bl_mut);
 }
-static void wait_blink_leds(struct work_struct *wait_blink)
+
+static void turn_on_blue(struct work_struct *turn_on)
+{
+    mutex_lock(&bl_mut);
+
+    pr_info("enable blue led \n");
+    gpio_set_value(BLUE_LED_PIN, 1);
+
+    bl_ops_blue.cmd = NO_CMD;
+    mutex_unlock(&bl_mut);
+}
+
+static void turn_on_red(struct work_struct *turn_on)
+{
+    mutex_lock(&bl_mut);
+
+    pr_info("enable red led \n");
+    gpio_set_value(RED_LED_PIN, 1);
+
+    bl_ops_red.cmd = NO_CMD;
+    mutex_unlock(&bl_mut);
+}
+static void blink_blue(struct work_struct *blink_blue_work)
 {
     long i;
     mutex_lock(&bl_mut);
-    pr_info("Used minor to blink %d, used blinks number is %ld\n",
-            bl_ops.minor,
-            bl_ops.blinks_num);
-    if (RED_LED_MINOR == bl_ops.minor) {
-        for (i = 0; i < bl_ops.blinks_num; i++) {
-            pr_info("BLinking RED led now with interval %ld ms\n",
-                    bl_ops.interval_ms);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(RED_LED_PIN, 1);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(RED_LED_PIN, 0);
-        }
+    pr_info("Used  blinks number is %ld\n", bl_ops_blue.blinks_num);
+
+    for (i = 0; i < bl_ops_blue.blinks_num; i++) {
+        pr_info("BLinking blue led now with interval %ld ms\n",
+                bl_ops_blue.interval_ms);
+        msleep((unsigned int)bl_ops_blue.interval_ms);
+        gpio_set_value(BLUE_LED_PIN, 1);
+        msleep((unsigned int)bl_ops_blue.interval_ms);
+        gpio_set_value(BLUE_LED_PIN, 0);
     }
-    if (BLUE_LED_MINOR == bl_ops.minor) {
-        for (i = 0; i < bl_ops.blinks_num; i++) {
-            pr_info("BLinking blue led now with interval %ld ms\n",
-                    bl_ops.interval_ms);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(BLUE_LED_PIN, 1);
-            msleep((unsigned int)bl_ops.interval_ms);
-            gpio_set_value(BLUE_LED_PIN, 0);
-        }
+    bl_ops_blue.blinks_num  = DEF_BLINK_NUM;
+    bl_ops_blue.cmd         = NO_CMD;
+    bl_ops_blue.interval_ms = DEF_INTERVAL;
+    mutex_unlock(&bl_mut);
+}
+
+static void blink_red(struct work_struct *blink_red_work)
+{
+    long i;
+    mutex_lock(&bl_mut);
+    pr_info("Used blinks number is %ld\n", bl_ops_red.blinks_num);
+
+    for (i = 0; i < bl_ops_red.blinks_num; i++) {
+        pr_info("BLinking RED led now with interval %ld ms\n",
+                bl_ops_red.interval_ms);
+        msleep((unsigned int)bl_ops_red.interval_ms);
+        gpio_set_value(RED_LED_PIN, 1);
+        msleep((unsigned int)bl_ops_red.interval_ms);
+        gpio_set_value(RED_LED_PIN, 0);
     }
-    bl_ops.blinks_num  = DEF_BLINK_NUM;
-    bl_ops.cmd         = NO_CMD;
-    bl_ops.interval_ms = DEF_INTERVAL;
+
+    bl_ops_red.blinks_num  = DEF_BLINK_NUM;
+    bl_ops_red.cmd         = NO_CMD;
+    bl_ops_red.interval_ms = DEF_INTERVAL;
     mutex_unlock(&bl_mut);
 }
 
@@ -333,9 +360,12 @@ void __exit cleanup_module(void)
 {
     dev_t devno;
     pr_info("Deinit char led driver\n");
-    cancel_work_sync(&turn_on);
-    cancel_work_sync(&turn_off);
-    cancel_work_sync(&wait_blink);
+    cancel_work_sync(&turn_off_blue_work);
+    cancel_work_sync(&turn_off_red_work);
+    cancel_work_sync(&blink_red_work);
+    cancel_work_sync(&blink_blue_work);
+    cancel_work_sync(&turn_on_blue_work);
+    cancel_work_sync(&turn_on_red_work);
     destroy_workqueue(queue);
 
     gpio_set_value(RED_LED_PIN, 0);
@@ -415,9 +445,10 @@ static ssize_t my_read(struct file *fil, char *buff, size_t len, loff_t *off)
 static ssize_t
 my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 {
-    int   minor;
-    short count;
-    int   err = 0;
+    int                  minor;
+    short                count;
+    int                  err = 0;
+    struct led_blink_ops bl_ops;
     if (len >= MAX_MESSAGE_LEN || len < 0) {
         pr_err("Invalid len parameter\n");
         return -EBADRQC;
@@ -427,6 +458,12 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     memset(msg, 0, MAX_MESSAGE_LEN);
     /* need to get the device minor number because we have two devices */
     minor = iminor(file_inode(fil));
+
+    if (RED_LED_MINOR == minor) {
+        memcpy(&bl_ops, &bl_ops_red, sizeof(struct led_blink_ops));
+    } else {
+        memcpy(&bl_ops, &bl_ops_blue, sizeof(struct led_blink_ops));
+    }
     /* copy the string from the user space program which open and write this
    * device */
     count = copy_from_user(msg, buff, len);
@@ -437,24 +474,33 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 #ifdef TEST_PRINT_BUFF
     print_ops_buff(buff, len);
 #endif
-    err = parse_cmd_buff(msg, len);
+    err = parse_cmd_buff(msg, len, &bl_ops);
     if (err) {
         goto out;
     }
     mutex_lock(&bl_mut);
-    bl_ops.minor = minor;
-
     if (bl_ops.cmd == TURN_ON) {
         mutex_unlock(&bl_mut);
-        queue_work(queue, &turn_on);
+        if (BLUE_LED_MINOR == minor) {
+            queue_work(queue, &turn_on_blue_work);
+        } else {
+            queue_work(queue, &turn_on_red_work);
+        }
     } else if (bl_ops.cmd == TURN_OFF) {
         mutex_unlock(&bl_mut);
-        queue_work(queue, &turn_off);
-        flush_work(&wait_blink);
+        if (BLUE_LED_MINOR == minor) {
+            queue_work(queue, &turn_off_blue_work);
+        } else {
+            queue_work(queue, &turn_off_red_work);
+        }
     } else if (bl_ops.cmd == TURN_BLINK) {
         mutex_unlock(&bl_mut);
         pr_info("Write command used is BLINK. Executing\n");
-        queue_work(queue, &wait_blink);
+        if (BLUE_LED_MINOR == minor) {
+            queue_work(queue, &blink_blue_work);
+        } else {
+            queue_work(queue, &blink_red_work);
+        }
     } else {
         mutex_unlock(&bl_mut);
         pr_err("Unknown command , 1 or 0 \n");
