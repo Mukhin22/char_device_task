@@ -220,11 +220,9 @@ out:
 static void turn_off_red(struct work_struct *turn_off_red_work)
 {
     mutex_lock(&bl_mut);
-
     pr_info("disable red led \n");
     gpio_set_value(RED_LED_PIN, 0);
     bl_ops_red.cmd = NO_CMD;
-
     mutex_unlock(&bl_mut);
 }
 
@@ -451,9 +449,11 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     short                count;
     int                  err = 0;
     struct led_blink_ops bl_ops;
+
     if (len >= MAX_MESSAGE_LEN || len < 0) {
         pr_err("Invalid len parameter\n");
-        return -EBADRQC;
+        err = -EBADRQC;
+        goto out;
     }
 
     mutex_lock(&msg_lock);
@@ -466,7 +466,8 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
     count = copy_from_user(msg, buff, len);
     if (unlikely(count)) {
         pr_err("copy_from_user failed, not copied bytes len is %d", count);
-        return -EAGAIN;
+        err = -EAGAIN;
+        goto out;
     }
 #ifdef TEST_PRINT_BUFF
     print_ops_buff(buff, len);
@@ -487,23 +488,21 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
         }
         memcpy(&bl_ops, &bl_ops_blue, sizeof(struct led_blink_ops));
     }
+    mutex_unlock(&bl_mut);
 
     if (bl_ops.cmd == TURN_ON) {
-        mutex_unlock(&bl_mut);
         if (BLUE_LED_MINOR == minor) {
             queue_work(queue, &turn_on_blue_work);
         } else {
             queue_work(queue, &turn_on_red_work);
         }
     } else if (bl_ops.cmd == TURN_OFF) {
-        mutex_unlock(&bl_mut);
         if (BLUE_LED_MINOR == minor) {
             queue_work(queue, &turn_off_blue_work);
         } else {
             queue_work(queue, &turn_off_red_work);
         }
     } else if (bl_ops.cmd == TURN_BLINK) {
-        mutex_unlock(&bl_mut);
         pr_info("Write command used is BLINK. Executing\n");
         if (BLUE_LED_MINOR == minor) {
             queue_work(queue, &blink_blue_work);
@@ -511,7 +510,6 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
             queue_work(queue, &blink_red_work);
         }
     } else {
-        mutex_unlock(&bl_mut);
         pr_err("Unknown command , 1 or 0 \n");
     }
 
@@ -520,7 +518,12 @@ out:
         pr_err("Write function failed\n");
         len = 0;
     }
-    mutex_unlock(&msg_lock);
+    if (mutex_is_locked(&bl_mut)) {
+        mutex_unlock(&bl_mut);
+    }
+    if (mutex_is_locked(&msg_lock)) {
+        mutex_unlock(&msg_lock);
+    }
     return len;
 }
 
