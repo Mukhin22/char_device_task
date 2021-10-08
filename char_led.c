@@ -65,9 +65,9 @@ struct led_blink_ops {
 #define MAX_TIMES_TO_BLINK 100
 #define MIN_TIMES_TO_BLINK 1
 
-#define MAX_INTER_MS   2500
-#define MIN_INTER_MS   100
-#define MAX_BLINK_ARGS 3
+#define MAX_INTER_MS 2500
+#define MIN_INTER_MS 100
+
 #define RED_LED_MINOR  1
 #define BLUE_LED_MINOR 0
 #define DEF_BLINK_OPS                                             \
@@ -84,9 +84,9 @@ static struct file_operations my_fops = {
     owner: THIS_MODULE
 };
 
-static char *      msg = NULL;
-static struct cdev my_cdev;
+static char *msg = NULL;
 static DEFINE_MUTEX(msg_lock);
+static struct cdev          my_cdev;
 static struct led_blink_ops bl_ops_red  = DEF_BLINK_OPS;
 static struct led_blink_ops bl_ops_blue = DEF_BLINK_OPS;
 static DEFINE_MUTEX(bl_mut);
@@ -145,6 +145,7 @@ static int check_cmd(long param, struct led_blink_ops *bl_ops)
     }
     return 0;
 }
+
 static int
 parse_cmd_buff(const char *buff, size_t len, struct led_blink_ops *bl_ops)
 {
@@ -218,6 +219,7 @@ out:
     }
     return err;
 }
+
 static void turn_off_red(struct work_struct *turn_off_red_work)
 {
     mutex_lock(&bl_mut);
