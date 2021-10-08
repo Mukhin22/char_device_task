@@ -93,7 +93,8 @@ static DEFINE_MUTEX(bl_mut);
 static atomic_t run_blue = ATOMIC_INIT(0);
 static atomic_t run_red  = ATOMIC_INIT(0);
 
-static struct workqueue_struct *queue;
+static struct workqueue_struct *red_queue;
+static struct workqueue_struct *blue_queue;
 DECLARE_WORK(turn_off_red_work, turn_off_red);
 DECLARE_WORK(turn_off_blue_work, turn_off_blue);
 
@@ -267,8 +268,9 @@ static void blink_blue(struct work_struct *blink_blue_work)
     memcpy(&bl_ops, &bl_ops_blue, sizeof(struct led_blink_ops));
     bl_ops_blue.cmd = NO_CMD;
     mutex_unlock(&bl_mut);
+    atomic_set(&run_blue, 1);
 
-    for (i = 0; i < bl_ops.blinks_num; i++) {
+    for (i = 0; (i < bl_ops.blinks_num) && atomic_read(&run_blue); i++) {
         pr_info("BLinking blue led now with interval %ld ms\n",
                 bl_ops.interval_ms);
         msleep((unsigned int)bl_ops.interval_ms);
@@ -276,6 +278,7 @@ static void blink_blue(struct work_struct *blink_blue_work)
         msleep((unsigned int)bl_ops.interval_ms);
         gpio_set_value(BLUE_LED_PIN, 0);
     }
+    atomic_set(&run_blue, 0);
 }
 
 static void blink_red(struct work_struct *blink_red_work)
@@ -287,9 +290,9 @@ static void blink_red(struct work_struct *blink_red_work)
     memcpy(&bl_ops, &bl_ops_red, sizeof(struct led_blink_ops));
     bl_ops_red.cmd = NO_CMD;
     mutex_unlock(&bl_mut);
+    atomic_set(&run_red, 1);
 
-    pr_info("Used blinks number is %ld\n", bl_ops.blinks_num);
-    for (i = 0; i < bl_ops.blinks_num; i++) {
+    for (i = 0; (i < bl_ops.blinks_num) && atomic_read(&run_red); i++) {
         pr_info("BLinking RED led now with interval %ld ms\n",
                 bl_ops.interval_ms);
         msleep((unsigned int)bl_ops.interval_ms);
@@ -297,6 +300,8 @@ static void blink_red(struct work_struct *blink_red_work)
         msleep((unsigned int)bl_ops.interval_ms);
         gpio_set_value(RED_LED_PIN, 0);
     }
+
+    atomic_set(&run_red, 0);
 }
 
 int __init init_module(void)
@@ -340,10 +345,16 @@ int __init init_module(void)
         pr_err("Device Add Error\n");
         goto out;
     }
-    queue = create_workqueue("led_cmd_queue");
-    if (!queue) {
+    red_queue = create_workqueue("red_led_queue");
+    if (!red_queue) {
         err = -ENOMEM;
-        pr_err("Failed to create work queue\n");
+        pr_err("Failed to create work red_queue\n");
+        goto out;
+    }
+    blue_queue = create_workqueue("blue_led_queue");
+    if (!blue_queue) {
+        err = -ENOMEM;
+        pr_err("Failed to create work blue_queue\n");
         goto out;
     }
     pr_info("This is my led control char driver\n");
@@ -366,7 +377,8 @@ void __exit cleanup_module(void)
     cancel_work_sync(&blink_blue_work);
     cancel_work_sync(&turn_on_blue_work);
     cancel_work_sync(&turn_on_red_work);
-    destroy_workqueue(queue);
+    destroy_workqueue(red_queue);
+    destroy_workqueue(blue_queue);
 
     gpio_set_value(RED_LED_PIN, 0);
     gpio_set_value(BLUE_LED_PIN, 0);
@@ -492,22 +504,24 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
 
     if (bl_ops.cmd == TURN_ON) {
         if (BLUE_LED_MINOR == minor) {
-            queue_work(queue, &turn_on_blue_work);
+            queue_work(blue_queue, &turn_on_blue_work);
         } else {
-            queue_work(queue, &turn_on_red_work);
+            queue_work(red_queue, &turn_on_red_work);
         }
     } else if (bl_ops.cmd == TURN_OFF) {
         if (BLUE_LED_MINOR == minor) {
-            queue_work(queue, &turn_off_blue_work);
+            atomic_set(&run_blue, 0);
+            queue_work(blue_queue, &turn_off_blue_work);
         } else {
-            queue_work(queue, &turn_off_red_work);
+            atomic_set(&run_red, 0);
+            queue_work(red_queue, &turn_off_red_work);
         }
     } else if (bl_ops.cmd == TURN_BLINK) {
         pr_info("Write command used is BLINK. Executing\n");
         if (BLUE_LED_MINOR == minor) {
-            queue_work(queue, &blink_blue_work);
+            queue_work(blue_queue, &blink_blue_work);
         } else {
-            queue_work(queue, &blink_red_work);
+            queue_work(red_queue, &blink_red_work);
         }
     } else {
         pr_err("Unknown command , 1 or 0 \n");
@@ -524,6 +538,7 @@ out:
     if (mutex_is_locked(&msg_lock)) {
         mutex_unlock(&msg_lock);
     }
+    pr_info("Write function complete\n");
     return len;
 }
 
