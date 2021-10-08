@@ -371,12 +371,8 @@ void __exit cleanup_module(void)
 {
     dev_t devno;
     pr_info("Deinit char led driver\n");
-    cancel_work_sync(&turn_off_blue_work);
-    cancel_work_sync(&turn_off_red_work);
-    cancel_work_sync(&blink_red_work);
-    cancel_work_sync(&blink_blue_work);
-    cancel_work_sync(&turn_on_blue_work);
-    cancel_work_sync(&turn_on_red_work);
+    flush_workqueue(red_queue);
+    flush_workqueue(blue_queue);
     destroy_workqueue(red_queue);
     destroy_workqueue(blue_queue);
 
