@@ -224,42 +224,40 @@ static void turn_off_red(struct work_struct *turn_off_red_work)
 {
     mutex_lock(&bl_mut);
     pr_info("disable red led \n");
-    gpio_set_value(RED_LED_PIN, 0);
     bl_ops_red.cmd = NO_CMD;
     mutex_unlock(&bl_mut);
+
+    gpio_set_value(RED_LED_PIN, 0);
 }
 
 static void turn_off_blue(struct work_struct *turn_off_blue_work)
 {
     mutex_lock(&bl_mut);
+    bl_ops_blue.cmd = NO_CMD;
+    mutex_unlock(&bl_mut);
 
     pr_info("disable blue led \n");
     gpio_set_value(BLUE_LED_PIN, 0);
-    bl_ops_blue.cmd = NO_CMD;
-
-    mutex_unlock(&bl_mut);
 }
 
 static void turn_on_blue(struct work_struct *turn_on_blue_work)
 {
     mutex_lock(&bl_mut);
+    bl_ops_blue.cmd = NO_CMD;
+    mutex_unlock(&bl_mut);
 
     pr_info("enable blue led \n");
     gpio_set_value(BLUE_LED_PIN, 1);
-
-    bl_ops_blue.cmd = NO_CMD;
-    mutex_unlock(&bl_mut);
 }
 
 static void turn_on_red(struct work_struct *turn_on_red_work)
 {
     mutex_lock(&bl_mut);
+    bl_ops_red.cmd = NO_CMD;
+    mutex_unlock(&bl_mut);
 
     pr_info("enable red led \n");
     gpio_set_value(RED_LED_PIN, 1);
-
-    bl_ops_red.cmd = NO_CMD;
-    mutex_unlock(&bl_mut);
 }
 static void blink_blue(struct work_struct *blink_blue_work)
 {
@@ -526,7 +524,8 @@ my_write(struct file *fil, const char *buff, size_t len, loff_t *off)
             queue_work(red_queue, &blink_red_work);
         }
     } else {
-        pr_err("Unknown command , 1 or 0 \n");
+        pr_err("No command to execute\n");
+        err = -EINVAL;
     }
 
 out:
