@@ -1,0 +1,8 @@
+Extend your driver to support additional command:
+2 %arg1% %arg2%
+where %arg1% - number of times to blink, %arg2% - blink interval.
+Keep support of 2 different LEDs at the time. 
+If try to execute command 2 while it is already active, new task is queued and executed after completion of current.
+While program 2 is active, command 1 does nothing, command 0 stops current task 2 (and next task is started, if any).
+Make use of threads in this task.
+Test, push into git, create PR.

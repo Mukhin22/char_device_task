@@ -1,5 +1,27 @@
 # Char device task project 
 
+## Description 
+
+This is Linux Kernel character device driver to control the gpio connected LEDs.
+
+Possible commands:
+
+1 - enable led
+
+0 - disable led (disable blinking, if it's active now)
+
+2 <blinks_number> <blinks_interval_ms> - blinking the LEDs with interval in miliseconds and number of blinks used in parameters.
+
+Each of the command can be used for both leds:
+
+*echo 1 > /dev/LED_CTRL*
+
+*echo 2 20 500> /dev/LED_CTRL1*
+
+Commands are queued.
+
+## Driver Usage
+
 1. Cross-compile module
 
 *make -j$(nproc) ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules*
@@ -43,12 +65,10 @@ from current directory:
 7. Check the module is working with commands
  - For red led:
 
-    *echo -en "\x01" > /dev/LED_CTRL*
-    
-    *echo -en "\x00" > /dev/LED_CTRL*
+    *sudo bash ./test.sh 0 10 200*
 
  - For blue led:
 
-    *echo -en "\x01" > /dev/LED_CTRL1*
-    
-    *echo -en "\x00" > /dev/LED_CTRL1*
+   *sudo bash ./test.sh 1 10 200*
+
+8. Now it can be used for your needs.

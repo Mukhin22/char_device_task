@@ -6,3 +6,4 @@
 *.mod.c
 .vscode/
 char_led.c
+example.c
